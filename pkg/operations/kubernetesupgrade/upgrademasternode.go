@@ -5,12 +5,16 @@ package kubernetesupgrade
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"path"
 	"time"
 
 	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/armhelpers"
+	"github.com/Azure/aks-engine/pkg/engine"
+	"github.com/Azure/aks-engine/pkg/engine/transform"
 	"github.com/Azure/aks-engine/pkg/i18n"
 	"github.com/Azure/aks-engine/pkg/operations"
 	"github.com/pkg/errors"
@@ -54,7 +58,7 @@ func (kmn *UpgradeMasterNode) CreateNode(ctx context.Context, poolName string, m
 	masterOffset := templateVariables["masterCount"]
 	kmn.logger.Infof("Master pool set count to: %v temporarily during upgrade...", masterOffset)
 
-	// Debug function - keep commented out
+	// NOTE: Keep this line commented out--it's only for debugging.
 	// WriteTemplate(kmn.Translator, kmn.UpgradeContainerService, kmn.TemplateMap, kmn.ParametersMap)
 
 	random := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -114,5 +118,31 @@ func (kmn *UpgradeMasterNode) Validate(vmName *string) error {
 			kmn.logger.Errorf("Node was not ready within %v", kmn.timeout)
 			return errors.Errorf("Node was not ready within %v", kmn.timeout)
 		}
+	}
+}
+
+// WriteTemplate writes the template and artifacts to an "Upgrade" folder under the output directory.
+// This is used for debugging.
+func WriteTemplate(
+	translator *i18n.Translator,
+	upgradeContainerService *api.ContainerService,
+	templateMap map[string]interface{}, parametersMap map[string]interface{}) {
+	updatedTemplateJSON, _ := json.Marshal(templateMap)
+	parametersJSON, _ := json.Marshal(parametersMap)
+
+	templateapp, err := transform.PrettyPrintArmTemplate(string(updatedTemplateJSON))
+	if err != nil {
+		logrus.Fatalf("error pretty printing template: %s \n", err.Error())
+	}
+	parametersapp, e := transform.PrettyPrintJSON(string(parametersJSON))
+	if e != nil {
+		logrus.Fatalf("error pretty printing template parameters: %s \n", e.Error())
+	}
+	outputDirectory := path.Join("_output", upgradeContainerService.Properties.MasterProfile.DNSPrefix, "Upgrade")
+	writer := &engine.ArtifactWriter{
+		Translator: translator,
+	}
+	if err := writer.WriteTLSArtifacts(upgradeContainerService, "vlabs", templateapp, parametersapp, outputDirectory, false, false); err != nil {
+		logrus.Fatalf("error writing artifacts: %s\n", err.Error())
 	}
 }
